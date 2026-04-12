@@ -317,4 +317,32 @@ describe('GitHubAdapter review trigger', () => {
     expect(options.isolationHints.prSha).toBe('abc123def456');
     expect(options.isolationHints.isForkPR).toBe(false);
   });
+
+  test('handles repos.get failure gracefully', async () => {
+    const adapter = createTriggerAdapter('reviewbot');
+    // Override repos.get to fail
+    // @ts-expect-error - accessing private property for testing
+    adapter.octokit.rest.repos.get = mock(async () => {
+      throw new Error('API rate limit exceeded');
+    });
+
+    const payload = createReviewRequestPayload('ReviewBot', 'developer');
+    await adapter.handleWebhook(payload, 'mock-signature');
+
+    // Should NOT proceed to handleMessage
+    expect(mockHandleMessage).not.toHaveBeenCalled();
+    // Should log the error
+    expect(mockLogger.error).toHaveBeenCalled();
+  });
+
+  test('catches handleMessage failure and notifies user', async () => {
+    const adapter = createTriggerAdapter('reviewbot');
+    mockHandleMessage.mockRejectedValueOnce(new Error('Workflow not found'));
+
+    const payload = createReviewRequestPayload('ReviewBot', 'developer');
+    // Should not throw
+    await adapter.handleWebhook(payload, 'mock-signature');
+
+    expect(mockLogger.error).toHaveBeenCalled();
+  });
 });

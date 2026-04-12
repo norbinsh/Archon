@@ -145,6 +145,35 @@ gh api repos/OWNER/REPO/hooks --method POST \
 
 **Important**: The webhook secret must be identical across all repos.
 
+## Auto-Review Trigger (Optional)
+
+Automatically run a workflow when a specific GitHub user is requested as a PR reviewer. This enables automated PR reviews without @mentioning the bot.
+
+### Setup
+
+Set environment variables:
+
+```ini
+# GitHub username to watch for (case-insensitive). Feature disabled when unset.
+GITHUB_REVIEW_TRIGGER_USER=your-review-bot-username
+
+# Workflow to run (default: archon-smart-pr-review)
+GITHUB_REVIEW_TRIGGER_WORKFLOW=archon-smart-pr-review
+```
+
+### How it works
+
+1. Someone requests `GITHUB_REVIEW_TRIGGER_USER` as a reviewer on a PR
+2. Archon receives the `review_requested` webhook event
+3. The configured workflow runs automatically with full PR context
+4. Results are posted as a comment on the PR
+
+:::note
+- The `GITHUB_ALLOWED_USERS` whitelist applies -- the PR author (sender) must be allowed
+- The reviewer username match is case-insensitive
+- Each PR gets its own conversation and isolation environment
+:::
+
 ## Further Reading
 
 - [Configuration](/getting-started/configuration/)
