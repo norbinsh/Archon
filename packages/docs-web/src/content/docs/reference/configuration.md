@@ -237,6 +237,8 @@ When `CLAUDE_USE_GLOBAL_AUTH` is unset, Archon auto-detects: it uses explicit to
 | `WEBHOOK_SECRET` | HMAC SHA-256 secret for GitHub webhook signature verification | -- |
 | `GITHUB_ALLOWED_USERS` | Comma-separated GitHub usernames for whitelist (case-insensitive) | Open access |
 | `GITHUB_BOT_MENTION` | @mention name the bot responds to in issues/PRs | Falls back to `BOT_DISPLAY_NAME` |
+| `GITHUB_REVIEW_TRIGGER_USER` | GitHub username -- auto-run workflow when this user is requested as PR reviewer (case-insensitive) | Disabled |
+| `GITHUB_REVIEW_TRIGGER_WORKFLOW` | Workflow to run on review trigger | `archon-smart-pr-review` |
 
 ### Platform Adapters -- Gitea
 

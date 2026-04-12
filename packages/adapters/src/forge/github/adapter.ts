@@ -811,7 +811,7 @@ ${userComment}`;
       const baseRepoFullName = prData.base.repo.full_name;
       isolationHints.isForkPR = headRepoFullName !== baseRepoFullName;
     } catch (error) {
-      const err = error as Error;
+      const err = toError(error);
       getLog().warn({ err, owner, repo, prNumber }, 'github.pr_head_fetch_failed');
       isolationHints.prFetchFailed = true;
     }
