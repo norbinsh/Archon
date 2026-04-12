@@ -379,6 +379,37 @@ export async function validateWorkflowResources(
       }
     }
 
+    // --- Plugin nodes: check plugin directories exist ---
+    if ('plugins' in node && Array.isArray(node.plugins)) {
+      for (const pluginPath of node.plugins) {
+        const resolvedPath = resolve(pluginPath.replace(/^~(?=$|\/)/, homedir()));
+        const pluginJsonPath = join(resolvedPath, '.claude-plugin', 'plugin.json');
+
+        const pluginExists = await fileExists(pluginJsonPath);
+
+        if (!pluginExists) {
+          issues.push({
+            level: 'warning',
+            nodeId: node.id,
+            field: 'plugins',
+            message: `Plugin at '${pluginPath}' not found or missing .claude-plugin/plugin.json`,
+            hint: 'Ensure the plugin directory exists and contains .claude-plugin/plugin.json',
+          });
+        }
+      }
+
+      // Warn if using plugins with Codex
+      if (provider === 'codex') {
+        issues.push({
+          level: 'warning',
+          nodeId: node.id,
+          field: 'plugins',
+          message: 'Plugins are Claude-only per-node — this will be ignored on Codex',
+          hint: 'Plugins have no Codex equivalent. Remove them or switch to provider: claude',
+        });
+      }
+    }
+
     // --- Hooks with Codex warning ---
     if ('hooks' in node && node.hooks && provider === 'codex') {
       issues.push({

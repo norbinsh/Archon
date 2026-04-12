@@ -7,6 +7,7 @@
  */
 import { readFile } from 'fs/promises';
 import { resolve, isAbsolute } from 'path';
+import { homedir } from 'os';
 import { execFileAsync } from '@archon/git';
 import { discoverScripts } from './script-discovery';
 import type {
@@ -456,6 +457,20 @@ async function resolveNodeProviderAndModel(
     }
   }
 
+  // Warn if Codex node has plugins (unsupported)
+  if (provider === 'codex' && node.plugins) {
+    getLog().warn({ nodeId: node.id }, 'dag.plugins_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has plugins set but uses Codex — per-node plugins are not supported for Codex.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag.plugins_warning_delivery_failed');
+    }
+  }
+
   // Warn if Codex node has Claude-only SDK options (effort, thinking, maxBudgetUsd, systemPrompt, fallbackModel, betas, sandbox)
   if (provider === 'codex') {
     const claudeOnlyFields = [
@@ -594,6 +609,14 @@ async function resolveNodeProviderAndModel(
         claudeOptions.allowedTools = [...(claudeOptions.allowedTools ?? []), 'Skill'];
       }
       getLog().info({ nodeId: node.id, skills: node.skills, agentId }, 'dag.skills_agent_created');
+    }
+    // Resolve and pass plugins to Claude SDK
+    if (node.plugins) {
+      claudeOptions.plugins = node.plugins.map(p => ({
+        type: 'local' as const,
+        path: resolve(p.replace(/^~(?=$|\/)/, homedir())),
+      }));
+      getLog().info({ nodeId: node.id, plugins: node.plugins }, 'dag.plugins_resolved');
     }
     // Inject per-project env vars (config file + DB) into subprocess env
     if (config.envVars && Object.keys(config.envVars).length > 0) {

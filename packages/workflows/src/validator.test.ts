@@ -342,3 +342,49 @@ describe('validateWorkflowResources — script nodes', () => {
     expect(scriptErrors).toHaveLength(0);
   });
 });
+
+// =============================================================================
+// validateWorkflowResources — plugins validation
+// =============================================================================
+
+describe('validateWorkflowResources — plugins validation', () => {
+  test('warns when plugin path missing .claude-plugin/plugin.json', async () => {
+    const workflow = makeWorkflow('test', [
+      { id: 'step1', prompt: 'test', plugins: ['/nonexistent/plugin'] } as unknown as DagNode,
+    ]);
+    const issues = await validateWorkflowResources(workflow, tmpDir);
+    const pluginWarnings = issues.filter(
+      i => i.field === 'plugins' && i.message.includes('not found')
+    );
+    expect(pluginWarnings).toHaveLength(1);
+    expect(pluginWarnings[0].level).toBe('warning');
+    expect(pluginWarnings[0].nodeId).toBe('step1');
+  });
+
+  test('no warning when plugin path has valid .claude-plugin/plugin.json', async () => {
+    const pluginDir = join(tmpDir, 'my-plugin', '.claude-plugin');
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(join(pluginDir, 'plugin.json'), '{}');
+
+    const workflow = makeWorkflow('test', [
+      { id: 'step1', prompt: 'test', plugins: [join(tmpDir, 'my-plugin')] } as unknown as DagNode,
+    ]);
+    const issues = await validateWorkflowResources(workflow, tmpDir);
+    const pluginWarnings = issues.filter(
+      i => i.field === 'plugins' && i.message.includes('not found')
+    );
+    expect(pluginWarnings).toHaveLength(0);
+  });
+
+  test('warns when plugins used with Codex provider', async () => {
+    const workflow = makeWorkflow(
+      'test',
+      [{ id: 'step1', prompt: 'test', plugins: ['/some/path'] } as unknown as DagNode],
+      'codex'
+    );
+    const issues = await validateWorkflowResources(workflow, tmpDir);
+    const codexWarnings = issues.filter(i => i.field === 'plugins' && i.message.includes('Codex'));
+    expect(codexWarnings).toHaveLength(1);
+    expect(codexWarnings[0].level).toBe('warning');
+  });
+});
