@@ -56,6 +56,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
     }
   }, [codebases, selectedProjectId, setSelectedProjectId]);
 
+  // Auto-select first codebase when nothing is selected
+  useEffect(() => {
+    if (!codebases || codebases.length === 0) return;
+    if (selectedProjectId) return;
+    setSelectedProjectId(codebases[0].id);
+  }, [codebases, selectedProjectId, setSelectedProjectId]);
+
   return (
     <projectContext.Provider
       value={{

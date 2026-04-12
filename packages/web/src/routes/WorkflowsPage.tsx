@@ -1,12 +1,32 @@
 import { Link } from 'react-router';
 import { Plus } from 'lucide-react';
 import { WorkflowList } from '@/components/workflows/WorkflowList';
+import { useProject } from '@/contexts/ProjectContext';
 
 export function WorkflowsPage(): React.ReactElement {
+  const { codebases, selectedProjectId, setSelectedProjectId, isLoadingCodebases } = useProject();
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <h1 className="text-lg font-semibold text-text-primary">Workflows</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold text-text-primary">Workflows</h1>
+          {!isLoadingCodebases && codebases && codebases.length > 0 && (
+            <select
+              value={selectedProjectId ?? ''}
+              onChange={(e): void => {
+                setSelectedProjectId(e.target.value || null);
+              }}
+              className="rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+            >
+              {codebases.map(cb => (
+                <option key={cb.id} value={cb.id}>
+                  {cb.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
         <Link
           to="/workflows/builder"
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary/90 transition-colors"
