@@ -68,7 +68,7 @@ These are implementation constraints, not slogans. Apply them by default.
 
 **SRP + ISP — Single Responsibility + Interface Segregation**
 - Keep each module and package focused on one concern
-- Extend behavior by implementing existing narrow interfaces (`IPlatformAdapter`, `IAssistantClient`, `IDatabase`, `IWorkflowStore`) whenever possible
+- Extend behavior by implementing existing narrow interfaces (`IPlatformAdapter`, `IAgentProvider`, `IDatabase`, `IWorkflowStore`) whenever possible
 - Avoid fat interfaces and "god modules" that mix policy, transport, and storage
 - Do not add unrelated methods to an existing interface — define a new one
 
@@ -122,7 +122,7 @@ bun test --watch            # Watch mode (single package)
 bun test packages/core/src/handlers/command-handler.test.ts  # Single file
 ```
 
-**Test isolation (mock.module pollution):** Bun's `mock.module()` permanently replaces modules in the process-wide cache — `mock.restore()` does NOT undo it ([oven-sh/bun#7823](https://github.com/oven-sh/bun/issues/7823)). To prevent cross-file pollution, packages that have conflicting `mock.module()` calls split their tests into separate `bun test` invocations: `@archon/core` (7 batches), `@archon/workflows` (5), `@archon/adapters` (4), `@archon/isolation` (3). See each package's `package.json` for the exact splits.
+**Test isolation (mock.module pollution):** Bun's `mock.module()` permanently replaces modules in the process-wide cache — `mock.restore()` does NOT undo it ([oven-sh/bun#7823](https://github.com/oven-sh/bun/issues/7823)). To prevent cross-file pollution, packages that have conflicting `mock.module()` calls split their tests into separate `bun test` invocations: `@archon/core` (7 batches), `@archon/workflows` (5), `@archon/adapters` (3), `@archon/isolation` (3). See each package's `package.json` for the exact splits.
 
 **Do NOT run `bun test` from the repo root** — it discovers all test files across all packages and runs them in one process, causing ~135 mock pollution failures. Always use `bun run test` (which uses `bun --filter '*' test` for per-package isolation).
 
@@ -268,7 +268,7 @@ packages/
 │       └── cli.ts            # CLI entry point
 ├── core/                     # @archon/core - Shared business logic
 │   └── src/
-│       ├── clients/          # AI SDK clients (Claude, Codex)
+│       ├── providers/         # AI SDK providers (Claude, Codex)
 │       ├── config/           # YAML config loading
 │       ├── db/               # Database connection, queries
 │       ├── handlers/         # Command handler (slash commands)
@@ -289,7 +289,7 @@ packages/
 │       ├── executor.ts       # Workflow execution orchestrator (executeWorkflow)
 │       ├── dag-executor.ts   # DAG-specific execution logic
 │       ├── store.ts          # IWorkflowStore interface (database abstraction)
-│       ├── deps.ts           # WorkflowDeps injection types (IWorkflowPlatform, IWorkflowAssistantClient)
+│       ├── deps.ts           # WorkflowDeps injection types (IWorkflowPlatform, IWorkflowAgentProvider)
 │       ├── event-emitter.ts  # Workflow observability events
 │       ├── logger.ts         # JSONL file logger
 │       ├── validator.ts      # Resource validation (command files, MCP configs, skill dirs)
@@ -404,7 +404,7 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 - **@archon/isolation**: Worktree isolation types, providers, resolver, error classifiers (depends only on @archon/git + @archon/paths)
 - **@archon/workflows**: Workflow engine - loader, router, executor, DAG, logger, bundled defaults (depends only on @archon/git + @archon/paths + @hono/zod-openapi + zod; DB/AI/config injected via `WorkflowDeps`)
 - **@archon/cli**: Command-line interface for running workflows and starting the web UI server (depends on @archon/server + @archon/adapters for the serve command)
-- **@archon/core**: Business logic, database, orchestration, AI clients (provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
+- **@archon/core**: Business logic, database, orchestration, AI providers (provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
 - **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)
 - **@archon/server**: OpenAPIHono HTTP server (Zod + OpenAPI spec generation via `@hono/zod-openapi`), Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
 - **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui + Zustand), SSE streaming to server. `WorkflowRunStatus`, `WorkflowDefinition`, and `DagNode` are all derived from `src/lib/api.generated.d.ts` (generated from the OpenAPI spec via `bun generate:types`; never import from `@archon/workflows`)
@@ -429,7 +429,8 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 
 **2. Command Handler** (`packages/core/src/handlers/`)
 - Process slash commands (deterministic, no AI)
-- Commands: `/command-set`, `/load-commands`, `/clone`, `/getcwd`, `/setcwd`, `/repos`, `/repo`, `/repo-remove`, `/worktree`, `/workflow`, `/status`, `/commands`, `/help`, `/reset`, `/reset-context`, `/init`
+- The orchestrator treats only these top-level commands as deterministic: `/help`, `/status`, `/reset`, `/workflow`, `/register-project`, `/update-project`, `/remove-project`, `/commands`, `/init`, `/worktree`
+- `/workflow` handles subcommands like `list`, `run`, `status`, `cancel`, `resume`, `abandon`, `approve`, `reject`
 - Update database, perform operations, return responses
 
 **3. Orchestrator** (`packages/core/src/orchestrator/`)
@@ -439,10 +440,10 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 - Session management: Create new or resume existing
 - Stream AI responses to platform
 
-**4. AI Assistant Clients** (`packages/core/src/clients/`)
-- Implement `IAssistantClient` interface
-- **ClaudeClient**: `@anthropic-ai/claude-agent-sdk`
-- **CodexClient**: `@openai/codex-sdk`
+**4. AI Agent Providers** (`packages/core/src/providers/`)
+- Implement `IAgentProvider` interface
+- **ClaudeProvider**: `@anthropic-ai/claude-agent-sdk`
+- **CodexProvider**: `@openai/codex-sdk`
 - Streaming: `for await (const event of events) { await platform.send(event) }`
 
 ### Configuration
@@ -530,7 +531,7 @@ curl http://localhost:3637/api/conversations/<conversationId>/messages
 ```
 ~/.archon/
 ├── workspaces/owner/repo/        # Project-centric layout
-│   ├── source/                   # Clone (from /clone) or symlink → local path
+│   ├── source/                   # Cloned repo or symlink → local path
 │   ├── worktrees/                # Git worktrees for this project
 │   ├── artifacts/                # Workflow artifacts (NEVER in git)
 │   │   ├── runs/{id}/            # Per-run artifacts ($ARTIFACTS_DIR)
@@ -561,7 +562,7 @@ curl http://localhost:3637/api/conversations/<conversationId>/messages
 
 **Quick reference:**
 - **Platform Adapters**: Implement `IPlatformAdapter`, handle auth, polling/webhooks
-- **AI Clients**: Implement `IAssistantClient`, session management, streaming
+- **AI Providers**: Implement `IAgentProvider`, session management, streaming
 - **Slash Commands**: Add to command-handler.ts, update database, no AI
 - **Database Operations**: Use `IDatabase` interface (supports PostgreSQL and SQLite via adapters)
 
@@ -675,8 +676,8 @@ async function createSession(conversationId: string, codebaseId: string) {
 
 1. **Codebase Commands** (per-repo):
    - Stored in `.archon/commands/` (plain text/markdown)
-   - Auto-detected via `/clone` or `/load-commands <folder>`
-   - Loaded by `/clone` or `/load-commands`, invoked by AI via orchestrator routing
+   - Discovered from the repository `.archon/commands/` directory
+   - Surfaced via `GET /api/commands` for the workflow builder and invoked by workflow `command:` nodes
 
 2. **Workflows** (YAML-based):
    - Stored in `.archon/workflows/` (searched recursively)
@@ -762,6 +763,9 @@ Pattern: Use `classifyIsolationError()` (from `@archon/isolation`) to map git er
 - `POST /api/codebases` - Register a codebase (clone or local path); body accepts `allowEnvKeys` for the env-leak gate
 - `PATCH /api/codebases/:id` - Flip the `allow_env_keys` consent bit; body: `{ allowEnvKeys: boolean }`. Audit-logged at `warn` level on every grant/revoke (`env_leak_consent_granted` / `env_leak_consent_revoked`) with `codebaseId`, `path`, `files`, `keys`, `scanStatus`, `actor`
 - `DELETE /api/codebases/:id` - Delete a codebase and clean up resources
+- `GET /api/codebases/:id/env` - List env var keys for a codebase (never returns values)
+- `PUT /api/codebases/:id/env` / `DELETE /api/codebases/:id/env/:key` - Upsert / delete a single codebase env var
+- `GET /api/codebases/:id/environments` - List tracked isolation environments for a codebase
 
 **Artifact Files:**
 - `GET /api/artifacts/:runId/*` - Serve a workflow artifact file by run ID and relative path; returns `text/markdown` for `.md` files, `text/plain` otherwise; 400 on path traversal (`..`), 404 if run or file not found
@@ -770,6 +774,7 @@ Pattern: Use `classifyIsolationError()` (from `@archon/isolation`) to map git er
 - `GET /api/commands` - List available command names (bundled + project-defined); optional `?cwd=`; returns `{ commands: [{ name, source: 'bundled' | 'project' }] }`
 
 **System:**
+- `GET /api/health` - Health check with adapter/system status
 - `GET /api/update-check` - Check for available updates; returns `{ updateAvailable, currentVersion, latestVersion, releaseUrl }`; skips GitHub API call for non-binary builds
 
 **OpenAPI Spec:**
