@@ -24,6 +24,7 @@ export interface WebhookEvent {
     body: string;
     user: { login: string };
   };
+  requested_reviewer?: { login: string };
   repository: {
     owner: { login: string };
     name: string;
