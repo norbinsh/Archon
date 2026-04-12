@@ -379,7 +379,7 @@ export async function validateWorkflowResources(
       }
     }
 
-    // --- Plugins nodes: check plugin directories exist ---
+    // --- Plugin nodes: check plugin directories exist ---
     if ('plugins' in node && Array.isArray(node.plugins)) {
       for (const pluginPath of node.plugins) {
         const resolvedPath = resolve(pluginPath.replace(/^~(?=$|\/)/, homedir()));
