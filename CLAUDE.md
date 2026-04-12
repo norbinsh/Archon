@@ -797,3 +797,9 @@ Pattern: Use `classifyIsolationError()` (from `@archon/isolation`) to map git er
 - Parse `@archon` in issue/PR **comments only** (not descriptions)
 - Events: `issue_comment` only
 - Note: Descriptions often contain example commands or documentation - these are NOT command invocations (see #96)
+
+**Review-Request Trigger (optional):**
+- Auto-runs a workflow when a configured GitHub user is requested as PR reviewer
+- Events: `review_requested` only
+- Configured via `GITHUB_REVIEW_TRIGGER_USER` and `GITHUB_REVIEW_TRIGGER_WORKFLOW` env vars
+- Disabled by default (requires env var to enable)
