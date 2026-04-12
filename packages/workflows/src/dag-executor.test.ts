@@ -2443,6 +2443,247 @@ nodes:
   });
 });
 
+// ---------------------------------------------------------------------------
+// Plugins — executor-level behavior
+// ---------------------------------------------------------------------------
+
+describe('executeDagWorkflow -- plugins options', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-exec-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'My command prompt for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('passes plugins to sendQuery when node has plugins', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-plugins',
+        nodes: [
+          { id: 'review', command: 'my-cmd', plugins: ['/path/to/plugin-a', '/path/to/plugin-b'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    const plugins = optionsArg?.plugins as Array<{ type: string; path: string }>;
+    expect(plugins).toEqual([
+      { type: 'local', path: '/path/to/plugin-a' },
+      { type: 'local', path: '/path/to/plugin-b' },
+    ]);
+  });
+
+  it('expands tilde in plugin paths', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-plugins-tilde',
+        nodes: [{ id: 'review', command: 'my-cmd', plugins: ['~/my-plugin'] }],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    const plugins = optionsArg?.plugins as Array<{ type: string; path: string }>;
+    expect(plugins).toBeDefined();
+    expect(plugins.length).toBe(1);
+    expect(plugins[0].type).toBe('local');
+    // Should NOT start with ~ — should be expanded to homedir
+    expect(plugins[0].path).not.toMatch(/^~/);
+    expect(plugins[0].path).toContain('my-plugin');
+  });
+
+  it('warns user when Codex DAG node has plugins and does not pass plugins', async () => {
+    mockGetAssistantClientDag.mockReturnValue({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'codex',
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-codex-plugins',
+        nodes: [
+          {
+            id: 'review',
+            command: 'my-cmd',
+            provider: 'codex',
+            plugins: ['/path/to/plugin'],
+          },
+        ],
+      },
+      workflowRun,
+      'codex',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      { ...minimalConfig, assistant: 'codex' }
+    );
+
+    // Warning sent to user
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const warning = messages.find(m => m.includes('plugins') && m.includes('Codex'));
+    expect(warning).toBeDefined();
+
+    // No plugins passed to Codex sendQuery
+    if (mockSendQueryDag.mock.calls.length > 0) {
+      const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.plugins).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plugins — loader validation via parseWorkflow
+// ---------------------------------------------------------------------------
+
+describe('plugins field validation via parseWorkflow', () => {
+  it('parses valid plugins array on a DAG node', () => {
+    const yaml = `
+name: test-plugins
+description: test
+nodes:
+  - id: review
+    prompt: "Review the code"
+    plugins:
+      - /path/to/plugin-a
+      - ~/plugin-b
+`;
+    const result = parseWorkflow(yaml, 'test.yaml');
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+    const wf = result.workflow!;
+    expect(wf.nodes).toBeDefined();
+    expect(wf.nodes[0].plugins).toEqual(['/path/to/plugin-a', '~/plugin-b']);
+  });
+
+  it('rejects non-string plugin paths', () => {
+    const yaml = `
+name: bad-plugins
+description: test
+nodes:
+  - id: review
+    prompt: "Review"
+    plugins:
+      - 123
+`;
+    const result = parseWorkflow(yaml, 'bad.yaml');
+    expect(result.error).not.toBeNull();
+    expect(result.error!.error).toContain('plugin');
+  });
+
+  it('rejects empty plugins array', () => {
+    const yaml = `
+name: empty-plugins
+description: test
+nodes:
+  - id: review
+    prompt: "Review"
+    plugins: []
+`;
+    const result = parseWorkflow(yaml, 'empty.yaml');
+    expect(result.error).not.toBeNull();
+    expect(result.error!.error).toContain('plugins');
+  });
+
+  it('ignores plugins on bash nodes', () => {
+    const yaml = `
+name: bash-plugins
+description: test
+nodes:
+  - id: lint
+    bash: "echo lint"
+    plugins:
+      - /should/be/ignored
+`;
+    const result = parseWorkflow(yaml, 'bash-plugins.yaml');
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+    const wf = result.workflow!;
+    expect(wf.nodes).toBeDefined();
+    expect(wf.nodes[0].plugins).toBeUndefined();
+  });
+
+  it('node with no plugins has undefined plugins field', () => {
+    const yaml = `
+name: no-plugins
+description: test
+nodes:
+  - id: basic
+    prompt: "Do something"
+`;
+    const result = parseWorkflow(yaml, 'no-plugins.yaml');
+    expect(result.error).toBeNull();
+    const wf = result.workflow!;
+    expect(wf.nodes).toBeDefined();
+    expect(wf.nodes[0].plugins).toBeUndefined();
+  });
+});
+
 describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
   let testDir: string;
 

@@ -133,6 +133,8 @@ export interface WorkflowAssistantOptions {
    * References a key in `agents`. Claude only.
    */
   agent?: string;
+  /** Plugin configurations passed to Claude Agent SDK Options.plugins. Claude only. */
+  plugins?: { type: 'local'; path: string }[];
   /**
    * Additional env vars to merge into the Claude subprocess environment.
    * Merged after buildSubprocessEnv() (auth tokens conditionally filtered): { ...buildSubprocessEnv(), ...env }.

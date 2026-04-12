@@ -293,6 +293,8 @@ export interface AssistantRequestOptions {
   agents?: Record<string, AgentDefinition>;
   /** Name of agent definition for the main thread. References a key in `agents`. Claude only. */
   agent?: string;
+  /** Plugin configurations passed to Claude Agent SDK Options.plugins. Claude only. */
+  plugins?: { type: 'local'; path: string }[];
   /**
    * Abort signal for cancelling in-flight AI requests.
    * When aborted, the AI client should terminate the subprocess/query gracefully.

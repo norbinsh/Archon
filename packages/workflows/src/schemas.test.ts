@@ -648,6 +648,7 @@ describe('SCRIPT_NODE_AI_FIELDS', () => {
       'hooks',
       'mcp',
       'skills',
+      'plugins',
       'effort',
       'thinking',
       'maxBudgetUsd',
