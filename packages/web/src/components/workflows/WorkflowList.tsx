@@ -22,12 +22,7 @@ export function WorkflowList(): React.ReactElement {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<WorkflowCategory>('All');
   const { codebases, selectedProjectId } = useProject();
-  const [localProjectId, setLocalProjectId] = useState<string | null>(selectedProjectId);
   const messageInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setLocalProjectId(selectedProjectId);
-  }, [selectedProjectId]);
 
   // Focus message input when a workflow is selected
   useEffect(() => {
@@ -52,7 +47,7 @@ export function WorkflowList(): React.ReactElement {
     let conversationId: string | undefined;
     let workflowStarted = false;
     try {
-      ({ conversationId } = await createConversation(localProjectId ?? undefined));
+      ({ conversationId } = await createConversation(selectedProjectId ?? undefined));
       await runWorkflow(workflowName, conversationId, runMessage.trim());
       workflowStarted = true;
       setRunMessage('');
@@ -78,8 +73,8 @@ export function WorkflowList(): React.ReactElement {
     }
   };
 
-  const selectedCwd = localProjectId
-    ? codebases?.find(cb => cb.id === localProjectId)?.default_cwd
+  const selectedCwd = selectedProjectId
+    ? codebases?.find(cb => cb.id === selectedProjectId)?.default_cwd
     : undefined;
 
   const {
@@ -223,22 +218,6 @@ export function WorkflowList(): React.ReactElement {
                 <X className="size-3.5" />
               </button>
             </div>
-
-            {/* Project picker */}
-            <select
-              value={localProjectId ?? ''}
-              onChange={(e): void => {
-                setLocalProjectId(e.target.value || null);
-              }}
-              className="w-48 shrink-0 rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-            >
-              <option value="">No project</option>
-              {codebases?.map(cb => (
-                <option key={cb.id} value={cb.id}>
-                  {cb.name}
-                </option>
-              ))}
-            </select>
 
             {/* Message input + Run button */}
             <input

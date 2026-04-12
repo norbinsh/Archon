@@ -17,8 +17,9 @@ export function WorkflowsPage(): React.ReactElement {
               onChange={(e): void => {
                 setSelectedProjectId(e.target.value || null);
               }}
-              className="rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+              className="w-full rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-text-primary focus:border-primary focus:outline-none"
             >
+              <option value="">All Projects</option>
               {codebases.map(cb => (
                 <option key={cb.id} value={cb.id}>
                   {cb.name}

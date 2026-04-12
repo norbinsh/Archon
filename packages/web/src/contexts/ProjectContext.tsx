@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { listCodebases } from '@/lib/api';
 import type { CodebaseResponse } from '@/lib/api';
@@ -56,11 +56,18 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
     }
   }, [codebases, selectedProjectId, setSelectedProjectId]);
 
-  // Auto-select first codebase when nothing is selected
+  // Auto-select first codebase on initial load only (mount-only guard)
+  // Allows users to deselect back to "All Projects" without being overridden
+  const hasAutoSelected = useRef(false);
   useEffect(() => {
+    if (hasAutoSelected.current) return;
     if (!codebases || codebases.length === 0) return;
-    if (selectedProjectId) return;
+    if (selectedProjectId) {
+      hasAutoSelected.current = true;
+      return;
+    }
     setSelectedProjectId(codebases[0].id);
+    hasAutoSelected.current = true;
   }, [codebases, selectedProjectId, setSelectedProjectId]);
 
   return (
