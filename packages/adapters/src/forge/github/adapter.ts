@@ -52,6 +52,8 @@ export class GitHubAdapter implements IPlatformAdapter {
   private botMention: string;
   private lockManager: ConversationLockManager;
   private readonly retryDelayFn: (attempt: number) => number;
+  private readonly reviewTriggerUser: string | null;
+  private readonly reviewTriggerWorkflow: string;
 
   constructor(
     token: string,
@@ -74,6 +76,24 @@ export class GitHubAdapter implements IPlatformAdapter {
     }
 
     this.retryDelayFn = options?.retryDelayMs ?? ((attempt: number): number => 1000 * attempt);
+
+    // Parse review-request trigger config (optional - disabled by default)
+    const rawTriggerUser = process.env.GITHUB_REVIEW_TRIGGER_USER?.trim();
+    this.reviewTriggerUser = rawTriggerUser ? rawTriggerUser.toLowerCase() : null;
+    this.reviewTriggerWorkflow =
+      process.env.GITHUB_REVIEW_TRIGGER_WORKFLOW?.trim() || 'archon-smart-pr-review';
+
+    if (this.reviewTriggerUser) {
+      getLog().info(
+        {
+          reviewTriggerUser: this.reviewTriggerUser,
+          reviewTriggerWorkflow: this.reviewTriggerWorkflow,
+        },
+        'github.review_trigger_enabled'
+      );
+    } else {
+      getLog().debug('github.review_trigger_disabled');
+    }
 
     getLog().info({ botMention: this.botMention }, 'github.adapter_initialized');
   }
@@ -686,6 +706,144 @@ ${userComment}`;
   }
 
   /**
+   * Handle a review_requested event by triggering the configured workflow.
+   * Called from handleWebhook() when the requested reviewer matches config.
+   */
+  private async handleReviewRequest(event: WebhookEvent): Promise<void> {
+    const pr = event.pull_request;
+    if (!pr) return; // Caller already checks, but guard for type narrowing
+    const owner = event.repository.owner.login;
+    const repo = event.repository.name;
+    const prNumber = pr.number;
+
+    getLog().info(
+      {
+        owner,
+        repo,
+        number: prNumber,
+        reviewer: this.reviewTriggerUser,
+        workflow: this.reviewTriggerWorkflow,
+      },
+      'github.review_trigger_matched'
+    );
+
+    const conversationId = this.buildConversationId(owner, repo, prNumber);
+
+    // Get/create codebase
+    const {
+      codebase,
+      repoPath,
+      isNew: isNewCodebase,
+    } = await this.getOrCreateCodebaseForRepo(owner, repo);
+
+    // Get/create conversation and link to codebase
+    const existingConv = await db.getOrCreateConversation('github', conversationId);
+    const isNewConversation = !existingConv.codebase_id;
+
+    if (isNewConversation) {
+      try {
+        await db.updateConversation(existingConv.id, {
+          codebase_id: codebase.id,
+          cwd: repoPath,
+        });
+      } catch (updateError) {
+        if (updateError instanceof ConversationNotFoundError) {
+          getLog().error(
+            { conversationId: existingConv.id, codebaseId: codebase.id },
+            'github.conversation_codebase_link_failed'
+          );
+          throw new Error('Failed to set up GitHub conversation - please try again');
+        }
+        throw updateError;
+      }
+    }
+
+    // Get default branch
+    let defaultBranch: string;
+    try {
+      const { data: repoData } = await this.octokit.rest.repos.get({ owner, repo });
+      defaultBranch = repoData.default_branch;
+    } catch (error) {
+      const err = toError(error);
+      getLog().error({ err, owner, repo, conversationId }, 'github.repo_metadata_fetch_failed');
+      try {
+        const userMessage = classifyAndFormatError(err);
+        await this.sendMessage(conversationId, userMessage);
+      } catch (sendError) {
+        getLog().error(
+          { err: toError(sendError), conversationId },
+          'github.error_message_send_failed'
+        );
+      }
+      return;
+    }
+
+    // Ensure repo ready
+    await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewCodebase);
+
+    // Auto-load commands if new codebase
+    if (isNewCodebase) {
+      await this.autoDetectAndLoadCommands(repoPath, codebase.id);
+    }
+
+    // Build isolation hints (PR context)
+    const isolationHints: IsolationHints = {
+      workflowType: 'pr',
+      workflowId: String(prNumber),
+    };
+
+    // Get linked issues and PR branch info
+    const linkedIssues = await getLinkedIssueNumbers(owner, repo, prNumber);
+    if (linkedIssues.length > 0) {
+      isolationHints.linkedIssues = linkedIssues;
+    }
+
+    try {
+      const { data: prData } = await this.octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: prNumber,
+      });
+      isolationHints.prBranch = toBranchName(prData.head.ref);
+      isolationHints.prSha = prData.head.sha;
+
+      const headRepoFullName = prData.head.repo?.full_name;
+      const baseRepoFullName = prData.base.repo.full_name;
+      isolationHints.isForkPR = headRepoFullName !== baseRepoFullName;
+    } catch (error) {
+      const err = error as Error;
+      getLog().warn({ err, owner, repo, prNumber }, 'github.pr_head_fetch_failed');
+      isolationHints.prFetchFailed = true;
+    }
+
+    // Build message and context
+    const message = `/workflow run ${this.reviewTriggerWorkflow}`;
+    const contextToAppend = `GitHub Pull Request #${String(prNumber)}: "${pr.title}"\nUse 'gh pr view ${String(prNumber)}' for full details if needed.`;
+
+    // Route through lock manager + handleMessage
+    await this.lockManager.acquireLock(conversationId, async () => {
+      try {
+        await handleMessage(this, conversationId, message, {
+          issueContext: contextToAppend,
+          isolationHints,
+        });
+      } catch (error) {
+        const err = toError(error);
+        getLog().error({ err, conversationId }, 'github.review_trigger_failed');
+        try {
+          const userMessage = classifyAndFormatError(err);
+          await this.sendMessage(conversationId, userMessage);
+        } catch (sendError) {
+          getLog().error(
+            { err: toError(sendError), conversationId },
+            'github.review_trigger_error_send_failed'
+          );
+        }
+      }
+    });
+  }
+
+  /**
    * Handle incoming webhook event
    */
   async handleWebhook(payload: string, signature: string): Promise<void> {
@@ -708,6 +866,17 @@ ${userComment}`;
       const maskedUser = senderUsername ? `${senderUsername.slice(0, 3)}***` : 'unknown';
       getLog().info({ maskedUser }, 'github.unauthorized_webhook');
       return; // Silent rejection - no error response
+    }
+
+    // Review-request trigger: auto-run workflow when review is requested from configured user
+    if (
+      this.reviewTriggerUser &&
+      event.action === 'review_requested' &&
+      event.pull_request &&
+      event.requested_reviewer?.login?.toLowerCase() === this.reviewTriggerUser
+    ) {
+      await this.handleReviewRequest(event);
+      return;
     }
 
     const parsed = this.parseEvent(event);
