@@ -779,7 +779,25 @@ ${userComment}`;
     }
 
     // Ensure repo ready
-    await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewCodebase);
+    try {
+      await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewCodebase);
+    } catch (error) {
+      const err = toError(error);
+      getLog().error(
+        { err, owner, repo, repoPath, conversationId },
+        'github.review_trigger_repo_setup_failed'
+      );
+      try {
+        const userMessage = classifyAndFormatError(err);
+        await this.sendMessage(conversationId, userMessage);
+      } catch (sendError) {
+        getLog().error(
+          { err: toError(sendError), conversationId },
+          'github.review_trigger_error_send_failed'
+        );
+      }
+      return;
+    }
 
     // Auto-load commands if new codebase
     if (isNewCodebase) {
@@ -796,6 +814,7 @@ ${userComment}`;
     const linkedIssues = await getLinkedIssueNumbers(owner, repo, prNumber);
     if (linkedIssues.length > 0) {
       isolationHints.linkedIssues = linkedIssues;
+      getLog().info({ prNumber, linkedIssues }, 'github.pr_linked_issues');
     }
 
     try {
@@ -812,7 +831,18 @@ ${userComment}`;
       isolationHints.isForkPR = headRepoFullName !== baseRepoFullName;
     } catch (error) {
       const err = toError(error);
-      getLog().warn({ err, owner, repo, prNumber }, 'github.pr_head_fetch_failed');
+      const isNonTransient =
+        err.message.includes('rate limit') ||
+        err.message.includes('403') ||
+        err.message.includes('401') ||
+        err.message.includes('Bad credentials');
+
+      const logData = { err, owner, repo, prNumber };
+      if (isNonTransient) {
+        getLog().error(logData, 'github.pr_head_fetch_failed');
+      } else {
+        getLog().warn(logData, 'github.pr_head_fetch_failed');
+      }
       isolationHints.prFetchFailed = true;
     }
 
