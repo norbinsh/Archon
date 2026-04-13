@@ -101,6 +101,7 @@ export interface NodeConfig {
   mcp?: string;
   hooks?: unknown;
   skills?: string[];
+  plugins?: { type: 'local'; path: string }[];
   allowed_tools?: string[];
   denied_tools?: string[];
   effort?: string;

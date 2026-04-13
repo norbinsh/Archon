@@ -1671,7 +1671,9 @@ export function registerApiRoutes(
         return c.json({ workflows: [] });
       }
 
-      const result = await discoverWorkflowsWithConfig(workingDir, loadConfig);
+      const result = await discoverWorkflowsWithConfig(workingDir, loadConfig, {
+        globalSearchPath: getArchonHome(),
+      });
       return c.json({
         workflows: result.workflows.map(ws => ({ workflow: ws.workflow, source: ws.source })),
         errors: result.errors.length > 0 ? result.errors : undefined,
@@ -2133,7 +2135,30 @@ export function registerApiRoutes(
         }
       }
 
-      // 2. Fall back to bundled defaults (binary: embedded map; dev: also check filesystem)
+      // 2. Try global workflows (~/.archon/.archon/workflows/)
+      {
+        const [workflowFolder] = getWorkflowFolderSearchPaths();
+        const globalPath = join(getArchonHome(), workflowFolder, filename);
+        try {
+          const content = await readFile(globalPath, 'utf-8');
+          const result = parseWorkflow(content, filename);
+          if (result.error) {
+            return apiError(c, 500, `Global workflow is invalid: ${result.error.error}`);
+          }
+          return c.json({
+            workflow: result.workflow,
+            filename,
+            source: 'project' as WorkflowSource,
+          });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            getLog().error({ err, name }, 'workflow.fetch_global_failed');
+            return apiError(c, 500, 'Failed to read global workflow');
+          }
+        }
+      }
+
+      // 3. Fall back to bundled defaults (binary: embedded map; dev: also check filesystem)
       if (Object.hasOwn(BUNDLED_WORKFLOWS, name)) {
         const bundledContent = BUNDLED_WORKFLOWS[name];
         const result = parseWorkflow(bundledContent, filename);

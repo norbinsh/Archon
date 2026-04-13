@@ -6,6 +6,7 @@
  * Captures all assistant output regardless of streaming mode for $node_id.output substitution.
  */
 import { resolve } from 'path';
+import { homedir } from 'os';
 import { execFileAsync } from '@archon/git';
 import { discoverScripts } from './script-discovery';
 import type {
@@ -343,6 +344,12 @@ async function resolveNodeProviderAndModel(
     mcp: node.mcp,
     hooks: node.hooks,
     skills: node.skills,
+    plugins: node.plugins
+      ? node.plugins.map(p => ({
+          type: 'local' as const,
+          path: resolve(p.replace(/^~(?=$|\/)/, homedir())),
+        }))
+      : undefined,
     allowed_tools: node.allowed_tools,
     denied_tools: node.denied_tools,
     effort: node.effort ?? workflowLevelOptions.effort,

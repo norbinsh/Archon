@@ -443,6 +443,12 @@ async function applyNodeConfig(
     getLog().info({ skills, agentId }, 'claude.skills_agent_created');
   }
 
+  // plugins
+  if (nodeConfig.plugins) {
+    options.plugins = nodeConfig.plugins;
+    getLog().info({ plugins: nodeConfig.plugins }, 'claude.plugins_resolved');
+  }
+
   // effort
   if (nodeConfig.effort !== undefined) {
     options.effort = nodeConfig.effort as Options['effort'];

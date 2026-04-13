@@ -129,6 +129,10 @@ export const dagNodeBaseSchema = z.object({
     .array(z.string().min(1, 'each skill must be a non-empty string'))
     .nonempty("'skills' must be a non-empty array")
     .optional(),
+  plugins: z
+    .array(z.string().min(1, 'each plugin path must be a non-empty string'))
+    .nonempty("'plugins' must be a non-empty array")
+    .optional(),
   effort: effortLevelSchema.optional(),
   thinking: thinkingConfigSchema.optional(),
   maxBudgetUsd: z.number().positive().optional(),
@@ -305,6 +309,7 @@ export const BASH_NODE_AI_FIELDS: readonly string[] = [
   'hooks',
   'mcp',
   'skills',
+  'plugins',
   'effort',
   'thinking',
   'maxBudgetUsd',
@@ -526,6 +531,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.hooks !== undefined ? { hooks: data.hooks } : {}),
       ...(data.mcp !== undefined ? { mcp: data.mcp.trim() } : {}),
       ...(data.skills !== undefined ? { skills: data.skills.map(s => s.trim()) } : {}),
+      ...(data.plugins !== undefined ? { plugins: data.plugins.map(p => p.trim()) } : {}),
       ...(data.effort !== undefined ? { effort: data.effort } : {}),
       ...(data.thinking !== undefined ? { thinking: data.thinking } : {}),
       ...(data.maxBudgetUsd !== undefined ? { maxBudgetUsd: data.maxBudgetUsd } : {}),
